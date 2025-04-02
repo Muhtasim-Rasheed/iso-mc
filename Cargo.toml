@@ -1,0 +1,9 @@
+[package]
+name = "iso-mc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+asefile = "0.3.8"
+macroquad = "0.4.14"
+noise = "0.9.0"
