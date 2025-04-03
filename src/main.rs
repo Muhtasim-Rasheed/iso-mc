@@ -259,52 +259,71 @@ impl World {
     fn update_visibility(&mut self, display_offset: Vec3) { // optimizing this is so freaking hard
         self.visible_blocks.clear();
 
-        // Decide chunk size based on window size
-        let chunk_x = ((screen_width() / BLOCK_FULL_SIZE / 7.0) as usize).min(WORLD_SIZE_X);
-        let chunk_z = ((screen_height() / BLOCK_FULL_SIZE / 7.0) as usize).min(WORLD_SIZE_Z);
+        let sw = screen_width();
+        let sh = screen_height();
 
+        // Define how much of the world should be visible, scaled to fit isometric projection
+        const CHUNK_SCALE: f32 = 10.0; // Adjust this for performance
+
+        // Convert screen space to isometric world space
+        let blocks_x = ((sw / (BLOCK_FULL_SIZE * 0.75)) as f32 / CHUNK_SCALE) as usize;
+        let blocks_z = ((sh / (BLOCK_FULL_SIZE * 0.5)) as f32 / CHUNK_SCALE) as usize;
+
+        // Ensure chunk size doesn't exceed world limits
+        let chunk_x = blocks_x.min(WORLD_SIZE_X);
+        let chunk_z = blocks_z.min(WORLD_SIZE_Z);
+
+        // Center the chunk around the camera (display_offset)
         let cam_x_min = (display_offset.x - (chunk_x as f32 / 2.0) * BLOCK_FULL_SIZE).max(0.0) as usize;
         let cam_x_max = (display_offset.x + (chunk_x as f32 / 2.0) * BLOCK_FULL_SIZE).min(WORLD_SIZE_X as f32) as usize;
         let cam_z_min = (display_offset.z - (chunk_z as f32 / 2.0) * BLOCK_FULL_SIZE).max(0.0) as usize;
         let cam_z_max = (display_offset.z + (chunk_z as f32 / 2.0) * BLOCK_FULL_SIZE).min(WORLD_SIZE_Z as f32) as usize;
 
         for x in cam_x_min..cam_x_max {
+            let base_screen_x = (x as f32 - display_offset.x) * BLOCK_FULL_SIZE / 2.0;
+            let base_screen_y = (x as f32 - display_offset.x) * BLOCK_FULL_SIZE / 4.0;
+
             for y in 0..WORLD_SIZE_Y {
                 for z in cam_z_min..cam_z_max {
-                    let screen_x = ((x as f32 - display_offset.x) - (z as f32 - display_offset.z)) * BLOCK_FULL_SIZE / 2.0;
-                    let screen_y = ((x as f32 - display_offset.x) + (z as f32 - display_offset.z)) * BLOCK_FULL_SIZE / 4.0 - (y as f32 - display_offset.y) * BLOCK_FULL_SIZE / 2.0;
-
-                    if screen_x < -BLOCK_FULL_SIZE * 2.0 ||
-                       screen_x > screen_width() + BLOCK_FULL_SIZE * 2.0 ||
-                       screen_y < -BLOCK_FULL_SIZE * 2.0 ||
-                       screen_y > screen_height() + BLOCK_FULL_SIZE * 2.0 {
+                    let block = &self.blocks[x][y][z];
+                    if block.block_type == BlockType::Air {
                         continue;
                     }
 
+                    let screen_x = base_screen_x - (z as f32 - display_offset.z) * BLOCK_FULL_SIZE / 2.0;
+                    let screen_y = base_screen_y + (z as f32 - display_offset.z) * BLOCK_FULL_SIZE / 4.0 - (y as f32 - display_offset.y) * BLOCK_FULL_SIZE / 2.0;
+
+                    // Early screen bounds check
+                    if !(screen_x >= -BLOCK_FULL_SIZE * 2.0
+                        && screen_x <= sw + BLOCK_FULL_SIZE * 2.0
+                        && screen_y >= -BLOCK_FULL_SIZE * 2.0
+                        && screen_y <= sh + BLOCK_FULL_SIZE * 2.0)
+                    {
+                        continue;
+                    }
+
+                    // Visibility check: Look ahead in the diagonal direction
                     let mut is_hidden = false;
-                    let mut i = 1;
-                    while i < 5 {
+                    for i in 1..5 {
                         let nx = x + i;
                         let ny = y + i;
                         let nz = z + i;
+
                         if nx >= WORLD_SIZE_X || ny >= WORLD_SIZE_Y || nz >= WORLD_SIZE_Z {
                             break;
                         }
+
                         if BlockType::is_non_transparent(self.blocks[nx][ny][nz].block_type) {
                             is_hidden = true;
                             break;
                         }
-                        i += 1;
                     }
 
                     if is_hidden {
                         continue;
                     }
 
-                    let block = &self.blocks[x][y][z];
-                    if block.block_type != BlockType::Air {
-                        self.visible_blocks.push((screen_x, screen_y, block.block_type));
-                    }
+                    self.visible_blocks.push((screen_x, screen_y, block.block_type));
                 }
             }
         }
@@ -413,9 +432,10 @@ async fn main() {
         print!("Drawing took {} micros ({} seconds)     \r", draw_time.as_micros(), draw_time.as_secs_f64());
         std::io::stdout().flush().unwrap();
         draw_text(format!("FPS: {}", get_fps()).as_str(), 10.0, 50.0, 48.0, WHITE);
-        draw_text(format!("Took {} milliseconds to generate world", world_gen_time.as_millis()).as_str(), 10.0, screen_height() - 40.0, 32.0, WHITE);
-        draw_text(format!("Took {} milliseconds to update visibility", update_visibility_time.as_millis()).as_str(), 10.0, screen_height() - 80.0, 32.0, WHITE);
-        draw_text(format!("Took {} milliseconds to draw", draw_time.as_millis()).as_str(), 10.0, screen_height() - 120.0, 32.0, WHITE);
+        draw_rectangle(10.0, screen_height() - 160.0, screen_width() - 20.0, 150.0, Color::from_rgba(0, 0, 0, 128));
+        draw_text(format!("Took {} milliseconds to generate world", world_gen_time.as_millis()).as_str(), 20.0, screen_height() - 40.0, 32.0, WHITE);
+        draw_text(format!("Took {} milliseconds to update visibility", update_visibility_time.as_millis()).as_str(), 20.0, screen_height() - 80.0, 32.0, WHITE);
+        draw_text(format!("Took {} milliseconds to draw", draw_time.as_millis()).as_str(), 20.0, screen_height() - 120.0, 32.0, WHITE);
         next_frame().await
     }
 }
